@@ -1,0 +1,191 @@
+---
+title: "Modelamiento basico de regresion logistica "
+author: "Mercedes Congacha Fernandez"
+date: "3 de agosto de 2020"
+output: html_notebook
+---
+
+
+1. Cargar la base de datos 
+```{r}
+library(csv)
+z=read.csv("Empresas.csv",header=T,sep=";",dec=".")
+head(z)
+```
+
+
+2. Estructura de los datos 
+```{r}
+str(z)
+```
+
+```{r}
+dim(z) #dimension
+```
+```{r}
+table(z$exito)
+```
+3. Analisis de datos perdidos 
+```{r}
+library(DataExplorer)
+plot_missing(z) 
+```
+4. Analisis exploratorio
+```{r}
+par(mfrow = c(1,2))
+hist(z$publicid, main = "Publicidad",col = "orange")
+hist(z$personal, main = "Cantidad de personal",col = "orange")
+
+```
+```{r}
+library(ggplot2)
+par(mfrow = c(1,2))
+plot(as.factor(z$gradnove), main = "grandnove",col = "seashell")
+plot(as.factor(z$tipo), main = "Tipo",col = "seashell")
+```
+
+
+```{r}
+par(mfrow = c(1,2))
+plot(as.factor(z$imasd), main = "imasd",col = "seashell")
+plot(as.factor(z$sectecng), main = "sector",col = "seashell")
+```
+
+4. Transformacion de variables y generacion de  variables dummies
+```{r}
+T_personal<- scale(z$personal) %>% as.data.frame()
+library(dummies)
+#Dicotomizacion de variables categoricas
+Datos_Dico_cat <- dplyr::select(z, imasd,sectecng,gradnove,tipo)
+Datos_Dico_cat <- dummy.data.frame(Datos_Dico_cat,names=c("imasd","sectecng","gradnove","tipo"))
+Datos_Dico_cat
+```
+
+5. Prueba de Chi cuadrado, para la seleccion de variable
+```{r}
+MasterTable <- cbind(dplyr::select(z,exito,publicid),T_personal,Datos_Dico_cat)
+#Prueba Chi - Cuadrado
+library(stats)
+chisq.test(table(MasterTable$imasd0,MasterTable$exito))
+chisq.test(table(MasterTable$imasd1,MasterTable$exito))
+chisq.test(table(MasterTable$sectecng1,MasterTable$exito))
+chisq.test(table(MasterTable$sectecng2,MasterTable$exito))
+
+
+```
+
+
+```{r}
+chisq.test(table(MasterTable$sectecng3,MasterTable$exito))
+chisq.test(table(MasterTable$gradnove1,MasterTable$exito))
+chisq.test(table(MasterTable$gradnove2,MasterTable$exito))
+chisq.test(table(MasterTable$tipo0,MasterTable$exito))
+chisq.test(table(MasterTable$tipo1,MasterTable$exito))
+
+```
+
+```{r}
+Table_F_1 <- cbind((dplyr::select(z,exito,publicid) %>% as.data.frame()),T_personal,
+                   dplyr::select(Datos_Dico_cat,gradnove1,gradnove2
+                        ))
+glimpse(Table_F_1)
+```
+
+6. Particion de la data 
+```{r}
+library(caret)
+set.seed(123) 
+z$exito <- as.factor(z$exito)
+index <- createDataPartition(Table_F_1$exito, p=0.7, list=FALSE)
+training <- Table_F_1[ index, ]
+testing <-  Table_F_1[-index, ]
+
+# Verificando la estructura de los datos particionados
+100*prop.table(table(Table_F_1$exito))
+100*prop.table(table(training$exito))
+100*prop.table(table(testing$exito))
+
+```
+7. Modelo de regresion logistica
+```{r}
+# Modelo logístico con todas las variables
+options(scipen=999)
+modelo_1 <- glm(exito ~ publicid +publicid + 
+                V1 + gradnove1, 
+                family=binomial,
+                data=training)
+
+summary(modelo_1) #Resumen del modelo
+coef(modelo_1) #Coeficientes del modelo
+```
+Se observa que las variables son significativas
+
+8. Prediciendo la probabilidad de la data de entrenamiento 
+```{r}
+# Prediciendo la probabilidad
+proba.pred_m1 <- predict(modelo_1,training,type="response")
+head(proba.pred_m1)
+
+# Prediciendo la clase (con punto de corte = 0.5)
+clase.pred_m1 <- as.factor(ifelse(proba.pred_m1 >= 0.5, 1, 0))
+levels(clase.pred_m1) <- c("NO","SI")
+
+str(clase.pred_m1)
+head(cbind(training,proba.pred_m1,clase.pred_m1),8)
+
+cbind(as.data.frame(proba.pred_m1),as.data.frame(clase.pred_m1))
+
+```
+9. Prediciendo la probabilidad de la data de validacion 
+```{r}
+proba.pred_1_test <- predict(modelo_1,testing,type="response")
+head(proba.pred_1_test)
+
+# Prediciendo la clase (con punto de corte = 0.5)
+clase.pred_1_test <- as.factor(ifelse(proba.pred_1_test >= 0.5, 1, 0))
+levels(clase.pred_1_test) <- c("NO","SI")
+
+head(clase.pred_1_test)
+str(clase.pred_1_test)
+head(cbind(testing,proba.pred_1_test,clase.pred_1_test),8)
+```
+
+10. Indicadores de eficiencia
+```{r}
+#############################
+# 1. Tabla de clasificación #
+#############################
+
+T_exito <- as.factor(testing$exito)
+levels(T_exito) <- c("NO","SI")
+
+data_testing <- cbind(testing,T_exito)
+
+# Calcular el % de acierto (accuracy)
+accuracy_test <- mean(clase.pred_1_test==data_testing$T_exito)
+accuracy_test
+
+# Calcular el error de mala clasificación
+error_test <- mean(clase.pred_1_test!=data_testing$T_exito)
+error_test
+
+library(gmodels)
+CrossTable(data_testing$T_exito,clase.pred_1_test,
+           prop.t=FALSE, prop.c=FALSE,prop.chisq=FALSE)
+
+# Usando el paquete caret
+library(caret)
+caret::confusionMatrix(clase.pred_1_test,data_testing$T_exito,positive="SI")
+```
+11. Curva ROC
+```{r}
+# Usando el paquete pROC
+library(pROC)
+
+# Área bajo la curva
+roc_test <- roc(data_testing$exito,proba.pred_1_test)
+roc_test$auc
+```
+
+
+https://rpubs.com/mercedesmedaly/645702
